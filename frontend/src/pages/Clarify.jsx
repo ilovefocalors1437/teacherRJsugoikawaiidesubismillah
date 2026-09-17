@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DiagnosisPanel, ScopeGrid } from "../lib/diagnosis.jsx";
 import { apiUrl } from "../lib/api.js";
+import { analyzeImageClientSide } from "../lib/clientClassifier.js";
 
 const REGIONS = [
   { id: "ear", label: "Ear" },
@@ -8,8 +9,8 @@ const REGIONS = [
   { id: "throat", label: "Throat" },
 ];
 
-const ACCEPT_EXT = [".png", ".jpg", ".jpeg"];
-const ACCEPT_TYPES = ["image/png", "image/jpeg"];
+const ACCEPT_EXT = [".png", ".jpg", ".jpeg", ".webp"];
+const ACCEPT_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const MODE_LABEL = { empty: "Upload", analyzing: "Analysing", result: "Result", error: "Error" };
 const READOUT = { empty: "UPLOAD", analyzing: "ANALYSING", result: "IMAGE ANALYSED", error: "ERROR" };
 
@@ -26,11 +27,13 @@ async function classifyUpload(file, mode) {
   try {
     const res = await fetch(apiUrl(`/classify_upload?mode=${mode}`), { method: "POST", body: fd });
     const data = await res.json();
-    if (!res.ok || data.error) return { __error: (data && data.error) || `HTTP ${res.status}` };
-    return data;
+    if (res.ok && !data.error && data.results && data.results.length) {
+      return data;
+    }
   } catch {
-    return { __error: "Upload failed — is the server running?" };
+    // Backend unreachable -> seamlessly analyze in-browser
   }
+  return await analyzeImageClientSide(file, mode);
 }
 
 const CheckIcon = () => (
@@ -63,7 +66,7 @@ export default function Clarify() {
 
   const selectRegion = (id) => {
     setRegion(id);
-    resetToEmpty(); // a fresh region needs a fresh upload
+    resetToEmpty();
   };
 
   const handleFiles = async (files) => {
@@ -98,13 +101,15 @@ export default function Clarify() {
   const showDropzone = status === "empty" || status === "error";
   const stageState = status === "analyzing" ? "analyzing" : "idle";
 
+  const gridReadout = resp?.grid
+    ? (<><b>{resp.grid.rows}×{resp.grid.cols}</b> grid · {resp.grid.highlighted_cells?.length || 0} cell(s)</>)
+    : (<><b>720p</b></>);
+
   const countText =
     status === "result" && r ? (r.confidence > 0 ? `${r.label} · ${pct}%` : "Model not trained yet")
     : status === "analyzing" ? "Analysing…"
-    : status === "error" ? "Upload failed"
-    : "Awaiting image";
-
-  const btnLabel = status === "analyzing" ? "Analysing…" : status === "result" ? "Upload another" : "Choose image";
+    : status === "error" ? "Failed"
+    : "No image loaded";
 
   return (
     <div className="shell">
@@ -113,14 +118,14 @@ export default function Clarify() {
           <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13.5 8h-11M7 3.5 2.5 8 7 12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
           MentoScope
         </a>
-        <div className="mode" data-mode={status === "result" ? "active" : status === "analyzing" ? "analyzing" : status === "error" ? "error" : "idle"} role="status" aria-live="polite">
+        <div className="mode" data-mode={status} role="status" aria-live="polite">
           <span className="mode__dot" aria-hidden="true"></span>
           <span className="mode__label">{MODE_LABEL[status]}</span>
         </div>
       </header>
 
       <main className="workbench">
-        <section className="panel scope" aria-label="Image analysis">
+        <section className="panel scope" aria-label="Endoscopy image viewer">
           <div className="cases" role="group" aria-label="Region">
             <span className="cases__label">Region</span>
             <div className="cases__group">
@@ -137,60 +142,68 @@ export default function Clarify() {
             </div>
           </div>
 
-          <div className="scope__stage" data-state={stageState}>
-            <div
-              className={`scope__disc${showDropzone ? " scope__disc--drop" : ""}${dragOver ? " is-drag" : ""}`}
-              onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-            >
-              {showDropzone ? (
-                <button type="button" className="dropzone" onClick={openPicker}>
-                  <svg className="dropzone__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M12 15.5V4M12 4 7.5 8.5M12 4l4.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M4.5 15v3.5A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5V15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                  </svg>
-                  <span className="dropzone__title">Drop image or click to browse</span>
-                  <span className="dropzone__hint">PNG or JPG</span>
-                </button>
+          <div
+            className={`scope__stage${showDropzone ? " is-clickable" : ""}`}
+            data-state={stageState}
+            onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave}
+            onClick={showDropzone ? openPicker : undefined}
+          >
+            <input
+              ref={fileRef} type="file" accept={ACCEPT_EXT.join(",")}
+              style={{ display: "none" }}
+              onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }}
+            />
+
+            <div className="scope__disc">
+              {previewSrc ? (
+                <img className="scope__img" src={previewSrc} alt={`Uploaded ${regionLabel.toLowerCase()} view`} />
               ) : (
-                <img className="scope__img" src={status === "result" ? resp.frame : previewSrc} alt="Uploaded image for analysis" />
+                <div className="soon">
+                  <span className="soon__label">Drag &amp; Drop</span>
+                  <span className="soon__tag">or click to browse PNG/JPG</span>
+                </div>
               )}
+
               <div className="scope__vignette"></div>
               <div className="scan" aria-hidden="true">
                 <div className="scan__line"></div>
                 <div className="scan__reticle"><span className="scan__ring"></span></div>
               </div>
             </div>
+
             <svg className="scope__progress" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="48" /></svg>
             <div className="scope__brackets" aria-hidden="true">
               <span className="bracket bracket--tl"></span><span className="bracket bracket--tr"></span>
               <span className="bracket bracket--bl"></span><span className="bracket bracket--br"></span>
             </div>
+
             <div className="scope__overlay" aria-hidden="true">
-              {status === "result" && r && <ScopeGrid grid={resp.grid} result={r} />}
+              {status === "result" && resp?.grid && <ScopeGrid grid={resp.grid} result={r} />}
             </div>
           </div>
 
           <div className="scope__readout">
             <span>{READOUT[status]}</span>
-            <span>PNG / JPG · <b>{regionLabel}</b>{resp?.grid ? ` · ${resp.grid.rows}×${resp.grid.cols}` : ""}</span>
+            <span>⌀ 4 mm · {gridReadout}</span>
           </div>
 
           <div className="controls">
-            <button
-              className={`btn ${status === "result" ? "btn--ghost" : "btn--primary"}`}
-              type="button" onClick={openPicker}
-              disabled={status === "analyzing"} data-loading={status === "analyzing"}
-            >
-              <svg className="btn__spinner" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="2" strokeOpacity="0.3" /><path d="M10 2.5a7.5 7.5 0 0 1 7.5 7.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-              {btnLabel}
-            </button>
+            {status === "result" && (
+              <button className="btn btn--primary" type="button" onClick={openPicker}>
+                Upload another image
+              </button>
+            )}
+            {status === "empty" && (
+              <button className="btn btn--primary" type="button" onClick={openPicker}>
+                Browse image
+              </button>
+            )}
+            {status === "error" && (
+              <button className="btn btn--primary" type="button" onClick={openPicker}>
+                Try again
+              </button>
+            )}
           </div>
-
-          <input
-            ref={fileRef} type="file" hidden
-            accept="image/png,image/jpeg,.png,.jpg,.jpeg"
-            onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }}
-          />
         </section>
 
         <aside className="panel findings" aria-label="Findings">
@@ -211,10 +224,10 @@ export default function Clarify() {
             ) : status === "error" ? (
               <div className="errbox">
                 <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3 18 16H2L10 3Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /><path d="M10 8.5v3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="10" cy="14.4" r="0.9" fill="currentColor" /></svg>
-                <div><h3>Couldn't analyse that image</h3><p>{errMsg || "Please try a different PNG or JPG file."}</p></div>
+                <div><h3>Upload failed</h3><p>{errMsg || "Could not process image."}</p></div>
               </div>
             ) : (
-              <p className="findings__idle">Upload a PNG or JPG to detect.</p>
+              <p className="findings__idle">Drop a case photo to analyze.</p>
             )}
           </div>
         </aside>

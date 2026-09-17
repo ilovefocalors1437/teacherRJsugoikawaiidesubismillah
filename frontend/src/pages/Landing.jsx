@@ -209,32 +209,7 @@ export default function Landing() {
         </div>
       </div>
       <p className="orbit-hint" aria-hidden="true">Select your card</p>
-      <footer className="landing-team-footer" style={{
-        position: 'fixed',
-        bottom: '14px',
-        left: 0,
-        right: 0,
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: '12px',
-        fontFamily: 'var(--font-mono, monospace)',
-        fontSize: '11px',
-        color: 'var(--text-faint, #5C7176)',
-        letterSpacing: '0.08em',
-        zIndex: 10,
-        pointerEvents: 'none'
-      }}>
-        <span>Punn 029778</span>
-        <span>·</span>
-        <span>Gio 029790</span>
-        <span>·</span>
-        <span>Vit 029774</span>
-        <span>·</span>
-        <span>Tenten 029770</span>
-        <span>·</span>
-        <span>Uea 024456</span>
-      </footer>
+      
     </div>
   );
 }
