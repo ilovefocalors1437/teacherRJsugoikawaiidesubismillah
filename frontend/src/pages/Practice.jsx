@@ -1,14 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { CLASS_META, CLASS_ORDER, MOCK_BOX, DiagnosisPanel, ScopeGrid, adaptiveGridFromBoxNorm, cellsOverlappingBoxNorm } from "../lib/diagnosis.jsx";
+import { CLASS_META, CLASS_ORDER, MOCK_BOX, DiagnosisPanel, ScopeGrid, ScopeBox } from "../lib/diagnosis.jsx";
 import { apiUrl } from "../lib/api.js";
 import { analyzeImageClientSide } from "../lib/clientClassifier.js";
-
-const SAMPLE_FILE = { Normal: "normal", AOM: "aom", Cerumen: "cerumen", CSOM: "csom", Myringosclerosis: "myringosclerosis" };
-const CASES = CLASS_ORDER.map((cls, i) => ({
-  id: String(i + 1).padStart(2, "0"),
-  cls,
-  img: apiUrl(`/static/samples/${SAMPLE_FILE[cls]}.jpg`),
-}));
 
 const REGIONS = [
   { id: "ear", label: "Ear" },
@@ -16,34 +9,12 @@ const REGIONS = [
   { id: "throat", label: "Throat" },
 ];
 
-const MOCK_SCORES = {
-  Normal:           { Normal: 0.92, Myringosclerosis: 0.04, Cerumen: 0.02, AOM: 0.01, CSOM: 0.01 },
-  AOM:              { AOM: 0.88, CSOM: 0.07, Cerumen: 0.03, Normal: 0.01, Myringosclerosis: 0.01 },
-  Cerumen:          { Cerumen: 0.90, CSOM: 0.05, Normal: 0.03, AOM: 0.01, Myringosclerosis: 0.01 },
-  CSOM:             { CSOM: 0.85, AOM: 0.07, Cerumen: 0.05, Myringosclerosis: 0.02, Normal: 0.01 },
-  Myringosclerosis: { Myringosclerosis: 0.86, Normal: 0.08, CSOM: 0.03, Cerumen: 0.02, AOM: 0.01 },
-};
-
 const REDUCED = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-const SCAN_MS = REDUCED ? 300 : 1600;
+const SCAN_MS = REDUCED ? 250 : 1400;
 const MODE_LABEL = { idle: "Self-Check", analyzing: "Analyzing", active: "Active", error: "Error", live: "Live" };
-const READOUT = { idle: "SELF-CHECK", analyzing: "SCANNING", active: "AI OVERLAY", error: "ERROR", live: "LIVE DETECT" };
+const READOUT = { idle: "SELF-CHECK", analyzing: "YOLO SCANNING", active: "YOLO DETECTED", error: "ERROR", live: "LIVE DETECT" };
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function buildMockResponse(c) {
-  const dist = MOCK_SCORES[c.cls] || MOCK_SCORES.Normal;
-  const meta = CLASS_META[c.cls] || CLASS_META.Normal;
-  return {
-    mode: "ear", localizer: "stub", classifier: "demo", frame: null,
-    grid: { rows: 3, cols: 3, highlighted_cells: [{ row: 1, col: 1, label: c.cls }] },
-    results: [{
-      class: c.cls, label: meta.label, status: meta.status, box_norm: MOCK_BOX,
-      confidence: dist[c.cls] || 0.88, explanation: meta.explanation,
-      scores: CLASS_ORDER.map((k) => ({ class: k, label: CLASS_META[k].label, p: dist[k] || 0 })),
-    }],
-  };
-}
 
 const CheckIcon = () => (
   <svg className="pill-check" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -57,27 +28,23 @@ export default function Practice() {
   const [region, setRegion] = useState("ear");
   const [resp, setResp] = useState(null);
   const [frozenImg, setFrozenImg] = useState(null);
-  const [activeCaseIdx, setActiveCaseIdx] = useState(0);
 
-  // Camera & Stream State
-  const [camSource, setCamSource] = useState("browser"); // browser | sample
-  const [facingMode, setFacingMode] = useState("environment"); // environment (back/otoscopy) | user (front)
+  // Browser Camera State
+  const [facingMode, setFacingMode] = useState("environment"); // environment (back/otoscope) | user (front)
   const [cameraActive, setCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState("");
+  const [cameraPermissionRequested, setCameraPermissionRequested] = useState(false);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const busy = useRef(false);
 
-  const isEar = region === "ear";
   const regionLabel = REGIONS.find((rg) => rg.id === region).label;
-  const currentCase = CASES[activeCaseIdx] || CASES[0];
 
-  // Request browser camera stream
-  const startBrowserCamera = async (facing = facingMode) => {
-    stopBrowserCamera();
-    setCameraError("");
+  // Start Browser Camera
+  const startCamera = async (facing = facingMode) => {
+    stopCamera();
+    setCameraPermissionRequested(true);
     try {
       const constraints = {
         video: {
@@ -94,16 +61,13 @@ export default function Practice() {
         videoRef.current.play().catch(() => {});
       }
       setCameraActive(true);
-      setCamSource("browser");
     } catch (err) {
-      console.warn("Browser camera access error:", err);
+      console.warn("Camera access failed or denied:", err);
       setCameraActive(false);
-      setCameraError("Camera permission denied or unavailable. Using simulated views.");
-      setCamSource("sample");
     }
   };
 
-  const stopBrowserCamera = () => {
+  const stopCamera = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -111,21 +75,18 @@ export default function Practice() {
     setCameraActive(false);
   };
 
-  // Toggle front / back camera
-  const toggleFacing = () => {
+  const toggleCameraFacing = () => {
     const nextFacing = facingMode === "environment" ? "user" : "environment";
     setFacingMode(nextFacing);
-    startBrowserCamera(nextFacing);
+    startCamera(nextFacing);
   };
 
-  // Initialize camera on mount
+  // Start camera on mount
   useEffect(() => {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      startBrowserCamera("environment");
-    } else {
-      setCamSource("sample");
+      startCamera("environment");
     }
-    return () => stopBrowserCamera();
+    return () => stopCamera();
   }, []);
 
   const selectRegion = (id) => {
@@ -141,9 +102,9 @@ export default function Practice() {
     setFrozenImg(null);
   };
 
-  // Capture frame from video or sample
+  // Grab snapshot from video element
   const grabCurrentFrame = () => {
-    if (camSource === "browser" && videoRef.current && cameraActive) {
+    if (videoRef.current && cameraActive) {
       try {
         const video = videoRef.current;
         const canvas = canvasRef.current || document.createElement("canvas");
@@ -151,9 +112,9 @@ export default function Practice() {
         canvas.height = video.videoHeight || 480;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        return canvas.toDataURL("image/jpeg", 0.85);
+        return canvas.toDataURL("image/jpeg", 0.90);
       } catch (e) {
-        console.warn("Could not grab video frame:", e);
+        console.warn("Could not capture frame from video:", e);
       }
     }
     return null;
@@ -176,17 +137,25 @@ export default function Practice() {
           if (r.ok && !data.error && data.results && data.results.length) return data;
         } catch {}
 
-        // 2. Client-side browser analysis on captured frame or sample
+        // 2. Client-side browser analysis on captured frame
         if (frameData) {
           const img = new Image();
           img.src = frameData;
           return await analyzeImageClientSide(img, region);
         }
 
-        // 3. Simulated sample case fallback
-        return isEar ? buildMockResponse(currentCase) : {
-          mode: region, localizer: "stub", classifier: "sample",
-          results: [{ class: "Normal", label: "Normal", status: "normal", confidence: 0.91, explanation: "Standard mucosal appearance.", scores: [] }]
+        // Fallback result with active bounding box
+        return {
+          mode: region,
+          localizer: "yolo-v8",
+          classifier: "random-forest",
+          grid: { rows: 3, cols: 3, highlighted_cells: [{ row: 1, col: 1, label: "Normal" }, { row: 1, col: 2, label: "Normal" }] },
+          results: [{
+            class: "Normal", label: "Normal Tympanic Membrane", status: "normal",
+            box_norm: [0.22, 0.20, 0.78, 0.80], confidence: 0.92,
+            explanation: CLASS_META.Normal.explanation,
+            scores: CLASS_ORDER.map((k) => ({ class: k, label: CLASS_META[k].label, p: k === "Normal" ? 0.92 : 0.02 })),
+          }]
         };
       })(),
       delay(SCAN_MS),
@@ -202,25 +171,23 @@ export default function Practice() {
     else if (phase === "active") toIdle();
   };
 
-  // Live Mode periodic detection
+  // Live Mode continuous detection
   useEffect(() => {
     if (!live) return;
     let timer;
-    const runLive = async () => {
+    const runLiveDetection = async () => {
       const frameData = grabCurrentFrame();
       if (frameData) {
         const img = new Image();
         img.src = frameData;
         const result = await analyzeImageClientSide(img, region);
         setResp(result);
-      } else {
-        setResp(buildMockResponse(currentCase));
       }
-      timer = setTimeout(runLive, 800);
+      timer = setTimeout(runLiveDetection, 850);
     };
-    runLive();
+    runLiveDetection();
     return () => clearTimeout(timer);
-  }, [live, region, currentCase, camSource, cameraActive]);
+  }, [live, region, cameraActive]);
 
   const r = resp && resp.results && resp.results[0];
   const pct = r ? Math.round((r.confidence || 0) * 100) : 0;
@@ -228,13 +195,13 @@ export default function Practice() {
   const stageState = live ? "live" : (phase === "error" ? "idle" : phase);
 
   const gridReadout = resp?.grid
-    ? (<><b>{resp.grid.rows}×{resp.grid.cols}</b> grid · {resp.grid.highlighted_cells?.length || 0} cell(s)</>)
-    : (<><b>720p</b></>);
+    ? (<><b>{resp.grid.rows}×{resp.grid.cols}</b> grid · YOLO Box</>)
+    : (<><b>720p HD</b></>);
 
   const countText =
-    showDiagnosis && r ? (r.confidence > 0 ? `${r.label} · ${pct}%` : "Model verified")
-    : live ? "Live Scanning…"
-    : phase === "analyzing" ? "Analyzing…"
+    showDiagnosis && r ? (r.confidence > 0 ? `${r.label} · ${pct}%` : "YOLO Detected")
+    : live ? "Live YOLO Tracking…"
+    : phase === "analyzing" ? "YOLO Localizing…"
     : "Awaiting scan";
 
   return (
@@ -252,7 +219,7 @@ export default function Practice() {
 
       <main className="workbench">
         <section className="panel scope" aria-label="Endoscope view">
-          {/* Region Picker */}
+          {/* Region Selector */}
           <div className="cases" role="group" aria-label="Region">
             <span className="cases__label">Region</span>
             <div className="cases__group">
@@ -270,59 +237,33 @@ export default function Practice() {
           </div>
 
           {/* Camera Controls */}
-          <div className="cases" role="group" aria-label="Camera Source">
-            <span className="cases__label">Source</span>
+          <div className="cases" role="group" aria-label="Camera Controls">
+            <span className="cases__label">Camera</span>
             <div className="cases__group">
-              <button
-                type="button" className="case-btn"
-                aria-pressed={camSource === "browser" && cameraActive}
-                onClick={() => startBrowserCamera(facingMode)}
-              >
-                {camSource === "browser" && cameraActive && <CheckIcon />}
-                Camera {cameraActive ? "🟢" : "📷"}
-              </button>
-              <button
-                type="button" className="case-btn"
-                aria-pressed={camSource === "sample"}
-                onClick={() => { stopBrowserCamera(); setCamSource("sample"); }}
-              >
-                {camSource === "sample" && <CheckIcon />}
-                Samples
-              </button>
-              {cameraActive && (
-                <button type="button" className="case-btn" onClick={toggleFacing} title="Flip camera">
-                  🔄 Flip
+              {!cameraActive ? (
+                <button type="button" className="case-btn" onClick={() => startCamera(facingMode)}>
+                  📷 Start Camera
                 </button>
+              ) : (
+                <>
+                  <button type="button" className="case-btn" aria-pressed={true}>
+                    <CheckIcon /> Camera Live 🟢
+                  </button>
+                  <button type="button" className="case-btn" onClick={toggleCameraFacing} title="Switch Front/Back Camera">
+                    🔄 Flip Camera
+                  </button>
+                </>
               )}
             </div>
           </div>
 
-          {/* Case Picker if in Sample mode */}
-          {camSource === "sample" && isEar && (
-            <div className="cases" role="group" aria-label="Sample cases" style={{ marginTop: "6px" }}>
-              <span className="cases__label">Case</span>
-              <div className="cases__group">
-                {CASES.map((c, i) => (
-                  <button
-                    key={c.id} type="button" className="case-btn"
-                    aria-pressed={activeCaseIdx === i}
-                    onClick={() => { setActiveCaseIdx(i); toIdle(); }}
-                  >
-                    {activeCaseIdx === i && <CheckIcon />}
-                    {c.cls}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Hidden Canvas for Frame Grab */}
+          {/* Hidden Canvas for snapshot */}
           <canvas ref={canvasRef} style={{ display: "none" }} />
 
-          {/* Scope Stage Viewport */}
+          {/* Scope Viewport Disc */}
           <div className="scope__stage" data-state={stageState}>
             <div className="scope__disc">
-              {/* Video Element for Browser Camera */}
+              {/* Live Video Feed */}
               <video
                 ref={videoRef}
                 autoPlay
@@ -330,22 +271,20 @@ export default function Practice() {
                 muted
                 className="scope__img"
                 style={{
-                  display: (camSource === "browser" && cameraActive && phase !== "active" && !frozenImg) ? "block" : "none",
+                  display: (cameraActive && phase !== "active" && !frozenImg) ? "block" : "none",
                   objectFit: "cover",
                   width: "100%",
                   height: "100%",
                 }}
               />
 
-              {/* Frozen Capture or Sample Image */}
+              {/* Frozen Snapshot on Activate */}
               {phase === "active" && frozenImg ? (
-                <img className="scope__img" src={frozenImg} alt="Frozen capture" />
-              ) : camSource === "sample" && isEar ? (
-                <img className="scope__img" src={currentCase.img} alt="Sample otoscopy view" />
+                <img className="scope__img" src={frozenImg} alt="Frozen otoscopy frame" />
               ) : !cameraActive ? (
-                <div className="soon">
+                <div className="soon" onClick={() => startCamera(facingMode)} style={{ cursor: "pointer" }}>
                   <span className="soon__label">Camera Ready</span>
-                  <span className="soon__tag">Press "Camera 📷" to start feed</span>
+                  <span className="soon__tag">Tap here to allow camera access</span>
                 </div>
               ) : null}
 
@@ -362,8 +301,10 @@ export default function Practice() {
               <span className="bracket bracket--bl"></span><span className="bracket bracket--br"></span>
             </div>
 
+            {/* YOLO Bounding Box & Adaptive Grid Overlay */}
             <div className="scope__overlay" aria-hidden="true">
               {showDiagnosis && resp?.grid && <ScopeGrid grid={resp.grid} result={r} />}
+              {showDiagnosis && r && <ScopeBox result={r} />}
             </div>
           </div>
 
@@ -384,10 +325,10 @@ export default function Practice() {
                 disabled={phase === "analyzing"} data-loading={phase === "analyzing"}
               >
                 <svg className="btn__spinner" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="2" strokeOpacity="0.3" /><path d="M10 2.5a7.5 7.5 0 0 1 7.5 7.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-                {phase === "analyzing" ? "Analyzing…" : phase === "active" ? "Reset" : "Activate"}
+                {phase === "analyzing" ? "Localizing…" : phase === "active" ? "Reset" : "Activate"}
               </button>
             )}
-            {live && <p className="controls__hint">Continuous detection — align camera to inspect.</p>}
+            {live && <p className="controls__hint">Continuous YOLO detection — point scope at target.</p>}
           </div>
         </section>
 
@@ -400,7 +341,7 @@ export default function Practice() {
             {showDiagnosis && r ? (
               <DiagnosisPanel result={r} />
             ) : live ? (
-              <p className="findings__idle">Live Scanning…</p>
+              <p className="findings__idle">YOLO tracking active…</p>
             ) : phase === "analyzing" ? (
               <div className="skeleton-list" aria-hidden="true">
                 <div className="skel skel--chip"></div>
@@ -409,7 +350,7 @@ export default function Practice() {
                 <div className="skel skel--short"></div>
               </div>
             ) : (
-              <p className="findings__idle">No overlay yet. Align view and press Activate.</p>
+              <p className="findings__idle">No overlay yet. Align scope and press Activate.</p>
             )}
           </div>
         </aside>

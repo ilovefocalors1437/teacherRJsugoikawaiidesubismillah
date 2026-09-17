@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { DiagnosisPanel, ScopeGrid } from "../lib/diagnosis.jsx";
+import { DiagnosisPanel, ScopeGrid, ScopeBox } from "../lib/diagnosis.jsx";
 import { apiUrl } from "../lib/api.js";
 import { analyzeImageClientSide } from "../lib/clientClassifier.js";
 
@@ -179,6 +179,7 @@ export default function Clarify() {
 
             <div className="scope__overlay" aria-hidden="true">
               {status === "result" && resp?.grid && <ScopeGrid grid={resp.grid} result={r} />}
+              {status === "result" && r && <ScopeBox result={r} />}
             </div>
           </div>
 
