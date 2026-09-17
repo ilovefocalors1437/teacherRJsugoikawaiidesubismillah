@@ -1,0 +1,16 @@
+{
+  "mode": "ear",
+  "classes": [
+    "AOM",
+    "CSOM",
+    "Cerumen",
+    "Myringosclerosis",
+    "Normal"
+  ],
+  "n_samples": 3014,
+  "n_features": 1812,
+  "trained_at": "2026-09-17T12:54:48",
+  "feature_stack": "HOG (9 orientations, 16px cells, 2x2 blocks, L2-Hys) ++ HSV colour histogram (16 bins per channel)",
+  "use_real_model": false,
+  "localizer": "yolo"
+}

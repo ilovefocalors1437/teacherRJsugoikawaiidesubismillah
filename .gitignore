@@ -1,0 +1,28 @@
+# Python & System
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+.env
+.venv
+env/
+venv/
+.impeccable/
+
+# Node & Frontend Build
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Large Datasets & Heavy Weights (Over GitHub 100MB limit)
+data set/
+crops/
+weights/clip/
+*.zip
+
+# Keep lightweight trained models and pre-extracted feature vectors!
+!models/features_ear.npz
+!models/classifier_ear.joblib
+!models/scaler_ear.joblib
+!models/yolo_ear.pt
+!models/meta_ear.json

@@ -1,0 +1,15 @@
+# MentoScope — Python dependencies
+# Backend + classifier training/inference
+flask>=3.0
+flask-cors>=4.0      # frontend served from a different device (Pi) needs CORS
+opencv-python>=4.8
+numpy>=1.24
+scipy>=1.10            # texture localizer (ndimage.uniform_filter)
+scikit-image>=0.21
+scikit-learn>=1.3
+joblib>=1.3
+
+# Real landmark localization (YOLO-World). The first run auto-downloads
+# the yolov8s-world.pt weights — the app logs this so it isn't mistaken
+# for a hang. If you keep USE_REAL_MODEL=False you can omit this.
+ultralytics>=8.1.0

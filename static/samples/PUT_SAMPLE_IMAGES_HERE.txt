@@ -1,0 +1,24 @@
+MentoScope — sample otoscopy images go here
+============================================
+
+Drop one representative eardrum photo per class, named exactly:
+
+    normal.jpg
+    aom.jpg              (Acute Otitis Media)
+    ome.jpg              (Otitis Media with Effusion)
+    otitis_externa.jpg
+    cerumen.jpg          (Earwax)
+
+Where they're used:
+  1. The frontend demo (templates/index.html) shows the matching image
+     inside the circular scope when you "Activate" a sample case.
+     If an image is missing, the UI falls back to a CSS-illustrated drum.
+  2. The Flask app's no-camera fallback (grab_single_frame) uses the
+     first image it finds here as a stand-in "captured frame" so
+     /activate works without a real endoscope plugged in.
+
+Good source: the Kaggle "eardrum dataset otitis media" (erdalbasaran) —
+copy one clear example out of each class folder.
+
+JPG or PNG, roughly centered on the drum, ~600px or larger. This .txt
+file is just a placeholder note; you can delete it once images are added.
